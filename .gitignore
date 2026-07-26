@@ -1,0 +1,13 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor/tooling
+.claude/
+
+# Anything stray at the repo root (env files, node_modules, build output are
+# already handled by client/.gitignore and server/.gitignore in their own
+# directories)
+.env
+.env.*
+node_modules/

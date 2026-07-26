@@ -1,0 +1,39 @@
+{
+  "name": "fidem-backend",
+  "version": "1.0.0",
+  "description": "Fidem admin panel API \u2014 pitch sheets, Modash media kit, Insight OS, YouTube influencer discovery.",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "nodemon app.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1035.0",
+    "@aws-sdk/client-ses": "^3.1011.0",
+    "@aws-sdk/s3-request-presigner": "^3.1020.0",
+    "axios": "^1.15.0",
+    "bcryptjs": "^3.0.2",
+    "cors": "^2.8.5",
+    "countries-and-timezones": "^3.8.0",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.3.2",
+    "jsonwebtoken": "^9.0.2",
+    "luxon": "^3.7.2",
+    "maxmind": "^5.0.5",
+    "mongoose": "^8.15.1",
+    "multer": "^2.0.2",
+    "openai": "^6.37.0",
+    "undici": "^7.15.0",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "dotenv": "^16.6.1",
+    "nodemon": "^3.1.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  }
+}
