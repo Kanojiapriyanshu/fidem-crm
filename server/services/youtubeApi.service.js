@@ -70,14 +70,19 @@ const VIDEO_CATEGORY_MAP = {
   44: 'Trailers'
 };
 
-function getApiKey() {
-  const key = process.env.YOUTUBE_API_KEY;
-  if (!key) {
-    const error = new Error('YOUTUBE_API_KEY is missing in environment variables.');
-    error.statusCode = 500;
-    throw error;
-  }
-  return key;
+const YT_API_KEYS = String(process.env.YOUTUBE_API_KEY || '')
+  .split(',')
+  .map((key) => key.trim())
+  .filter(Boolean);
+let ytApiKeyCursor = 0;
+
+function isQuotaOrKeyError(error) {
+  const status = error.response?.status;
+  if (![400, 403, 429].includes(Number(status))) return false;
+  const reason = String(
+    error.response?.data?.error?.errors?.[0]?.reason || ''
+  ).toLowerCase();
+  return /quotaexceeded|dailylimitexceeded|ratelimitexceeded|userratelimitexceeded|keyinvalid|forbidden/.test(reason);
 }
 
 function normalizeYouTubeError(error) {
@@ -96,19 +101,38 @@ function normalizeYouTubeError(error) {
 }
 
 async function youtubeGet(endpoint, params = {}) {
-  try {
-    const response = await axios.get(`${YOUTUBE_BASE_URL}/${endpoint}`, {
-      params: {
-        key: getApiKey(),
-        ...params
-      },
-      timeout: Number(process.env.YOUTUBE_TIMEOUT_MS || 20000)
-    });
-
-    return response.data;
-  } catch (error) {
-    throw normalizeYouTubeError(error);
+  if (!YT_API_KEYS.length) {
+    const error = new Error('YOUTUBE_API_KEY is missing in environment variables.');
+    error.statusCode = 500;
+    throw error;
   }
+
+  let lastError = null;
+
+  for (let attempt = 0; attempt < YT_API_KEYS.length; attempt += 1) {
+    const keyIndex = (ytApiKeyCursor + attempt) % YT_API_KEYS.length;
+
+    try {
+      const response = await axios.get(`${YOUTUBE_BASE_URL}/${endpoint}`, {
+        params: {
+          key: YT_API_KEYS[keyIndex],
+          ...params
+        },
+        timeout: Number(process.env.YOUTUBE_TIMEOUT_MS || 20000)
+      });
+
+      ytApiKeyCursor = keyIndex;
+      return response.data;
+    } catch (error) {
+      lastError = error;
+      if (attempt < YT_API_KEYS.length - 1 && isQuotaOrKeyError(error)) {
+        continue;
+      }
+      throw normalizeYouTubeError(error);
+    }
+  }
+
+  throw normalizeYouTubeError(lastError);
 }
 
 function chunkArray(items = [], size = 50) {
