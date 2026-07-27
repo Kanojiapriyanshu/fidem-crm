@@ -1,5 +1,6 @@
 import "./globals.css"
 import { Inter, Oswald } from "next/font/google"
+import type { Metadata } from "next"
 
 const inter = Inter({
   subsets: ["latin"],
@@ -13,6 +14,14 @@ const oswald = Oswald({
   variable: "--font-oswald",
   display: "swap",
 })
+
+export const metadata: Metadata = {
+  title: "Fidem",
+  description: "Fidem — influencer marketing admin panel.",
+  icons: {
+    icon: "/icon.png",
+  },
+}
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
