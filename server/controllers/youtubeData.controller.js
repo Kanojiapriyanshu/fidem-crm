@@ -1197,6 +1197,62 @@ function buildRequestCampaignDetails(q = {}) {
   };
 }
 
+// Words that naturally mark the end of one search phrase and the start of
+// another inside a long, run-on keyword string (e.g. a user typing several
+// product topics into one search box: "bluetooth speaker speaker review
+// headphone review earbuds review audio setup"). YouTube's search.list only
+// does well against short, focused phrases — treating the whole run-on
+// string as one literal query returns a much narrower, worse-matching pool
+// than searching each topic separately and merging the results.
+const PHRASE_SPLIT_TERMINATORS = new Set([
+  'review', 'reviews', 'unboxing', 'unboxings', 'comparison', 'comparisons',
+  'vs', 'test', 'tests', 'demo', 'demos', 'setup', 'setups', 'guide',
+  'guides', 'tutorial', 'tutorials',
+]);
+
+function splitKeywordIntoPhrases(rawKeyword) {
+  const cleaned = cleanStr(rawKeyword);
+  if (!cleaned) return [];
+
+  const words = cleaned.split(/\s+/).filter(Boolean);
+
+  // Collapse immediately-repeated words ("speaker speaker" -> "speaker").
+  const deduped = [];
+  for (const word of words) {
+    if (deduped.length && deduped[deduped.length - 1].toLowerCase() === word.toLowerCase()) continue;
+    deduped.push(word);
+  }
+
+  // Group words into phrases, closing the current phrase whenever a
+  // terminator word is hit.
+  const phrases = [];
+  let current = [];
+  for (const word of deduped) {
+    current.push(word);
+    if (PHRASE_SPLIT_TERMINATORS.has(word.toLowerCase())) {
+      phrases.push(current.join(' '));
+      current = [];
+    }
+  }
+  if (current.length) phrases.push(current.join(' '));
+
+  const seen = new Set();
+  const result = [];
+  for (const phrase of phrases) {
+    const key = phrase.toLowerCase();
+    if (!phrase || seen.has(key)) continue;
+    seen.add(key);
+    result.push(phrase);
+  }
+
+  // Splitting only helps when it actually produced more than one distinct
+  // phrase; otherwise keep the original string as-is (e.g. a normal short
+  // query with no terminator words shouldn't be altered).
+  if (result.length <= 1) return [cleaned];
+
+  return result.slice(0, 6);
+}
+
 function buildCampaignSearchQueries(campaignDetails = {}) {
   const product = cleanStr(campaignDetails.productName);
   const niche = cleanStr(campaignDetails.campaignNiche);
@@ -1205,10 +1261,11 @@ function buildCampaignSearchQueries(campaignDetails = {}) {
   const recommendationQueries = Array.isArray(campaignDetails.recommendationSearchQueries)
     ? campaignDetails.recommendationSearchQueries
     : [];
+  const splitKeywords = (campaignDetails.keywords || []).flatMap(splitKeywordIntoPhrases);
 
   const querySeeds = [
     ...recommendationQueries,
-    ...campaignDetails.keywords,
+    ...splitKeywords,
     ...getLocalizedSearchTerms(baseKeyword, country),
     ...getLocalizedSearchTerms(niche, country),
     baseKeyword,
@@ -1815,7 +1872,12 @@ function buildMongoFilter({
         return { subscribers: range };
       }),
     });
-  } else if (strictFilters && (minSubscribers != null || maxSubscribers != null)) {
+  } else if (minSubscribers != null || maxSubscribers != null) {
+    // A directly-entered min/max (single preset tier or a custom range) is
+    // just as deliberate as a tier pick above — always enforce it as a hard
+    // filter. Previously this was gated behind `strictFilters` (which the
+    // frontend never set), so a single-tier selection silently applied no
+    // subscriber constraint at all.
     const range = {};
     if (minSubscribers != null) range.$gte = minSubscribers;
     if (maxSubscribers != null) range.$lte = maxSubscribers;
@@ -2090,6 +2152,7 @@ async function startBrowseIncrementalJob({
   country,
   minSubscribers,
   maxSubscribers,
+  subscriberRanges,
   minAvgViews,
   strictFilters,
   strictCountry,
@@ -2124,6 +2187,21 @@ async function startBrowseIncrementalJob({
     const creator = creatorOrDoc?.filterMatch
       ? creatorOrDoc
       : creatorListDTO(creatorOrDoc, context);
+
+    // Live discovery inside this job intentionally runs with minSubscribers/
+    // maxSubscribers nulled out (broad net) so it isn't starved for candidates —
+    // but that means every creator it finds must be re-checked against the
+    // admin's actual subscriber range before it's allowed into the results.
+    if (
+      (minSubscribers != null || maxSubscribers != null || (Array.isArray(subscriberRanges) && subscriberRanges.length)) &&
+      !subscriberMatchesFilters(Number(creator.subscribers ?? creator.subscriberCount ?? 0), {
+        minSubscribers,
+        maxSubscribers,
+        subscriberRanges,
+      })
+    ) {
+      return false;
+    }
 
     // When the user selects a country in Browse Influencer, only show creators from that country.
     // This keeps searches like Japan as Japan-only while the backend keeps discovering until 50.
@@ -2555,6 +2633,7 @@ async function browseCreators(req, res) {
       country,
       minSubscribers,
       maxSubscribers,
+      subscriberRanges,
       subscriberTier: q.subscriberTier,
       strictFilters,
       searchMode,
@@ -2624,6 +2703,7 @@ async function browseCreators(req, res) {
         country,
         minSubscribers,
         maxSubscribers,
+        subscriberRanges,
         minAvgViews,
         strictFilters,
         strictCountry,

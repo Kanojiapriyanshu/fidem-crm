@@ -327,6 +327,8 @@ type SavedSortValue =
 type InfluencerFilters = {
   subscriberRange: string;
   subscriberRanges: string[];
+  customMinSubscribers: string;
+  customMaxSubscribers: string;
   countries: string[];
   category: string;
   avgViewsMin: string;
@@ -996,7 +998,15 @@ function countryLabel(code: string) {
 function chipText(filters: InfluencerFilters) {
   const chips: string[] = [];
 
-  if (filters.subscriberRanges?.length) {
+  if (filters.customMinSubscribers || filters.customMaxSubscribers) {
+    const min = filters.customMinSubscribers
+      ? formatNumber(Number(filters.customMinSubscribers))
+      : "0";
+    const max = filters.customMaxSubscribers
+      ? formatNumber(Number(filters.customMaxSubscribers))
+      : "∞";
+    chips.push(`Subscribers: ${min} - ${max}`);
+  } else if (filters.subscriberRanges?.length) {
     const labels = filters.subscriberRanges
       .map((v) => SUBSCRIBER_RANGES.find((x) => x.value === v)?.label)
       .filter(Boolean);
@@ -2065,6 +2075,8 @@ export default function YoutubePage() {
   const [filtersDraft, setFiltersDraft] = useState<InfluencerFilters>({
     subscriberRange: "",
     subscriberRanges: [],
+    customMinSubscribers: "",
+    customMaxSubscribers: "",
     countries: [],
     category: "",
     avgViewsMin: "",
@@ -2076,6 +2088,8 @@ export default function YoutubePage() {
   const [filtersActive, setFiltersActive] = useState<InfluencerFilters>({
     subscriberRange: "",
     subscriberRanges: [],
+    customMinSubscribers: "",
+    customMaxSubscribers: "",
     countries: [],
     category: "",
     avgViewsMin: "",
@@ -2346,7 +2360,30 @@ export default function YoutubePage() {
       sortBy: f.sortBy || "relevance",
     };
 
-    if (f.subscriberRange) {
+    const customMin = Number(f.customMinSubscribers);
+    const customMax = Number(f.customMaxSubscribers);
+    const hasCustomMin = f.customMinSubscribers !== "" && Number.isFinite(customMin);
+    const hasCustomMax = f.customMaxSubscribers !== "" && Number.isFinite(customMax);
+
+    if (hasCustomMin || hasCustomMax) {
+      // A freeform custom range takes priority over any preset tier selection.
+      if (hasCustomMin) out.followersMin = Math.max(0, Math.floor(customMin));
+      if (hasCustomMax) out.followersMax = Math.max(0, Math.floor(customMax));
+    } else if (f.subscriberRanges?.length) {
+      const ranges = f.subscriberRanges
+        .map((value) => SUBSCRIBER_RANGES.find((item) => item.value === value))
+        .filter((range): range is SubscriberRangeOption => Boolean(range));
+
+      const mins = ranges.map((r) => r.min).filter((v): v is number => v != null);
+      const maxes = ranges.map((r) => r.max);
+      // getAllInfluencers only supports a single contiguous min/max — a
+      // multi-tier selection is sent as the envelope covering every picked
+      // tier (exact when a single tier is selected, the common case).
+      if (mins.length) out.followersMin = Math.min(...mins);
+      if (maxes.length && !maxes.includes(null)) {
+        out.followersMax = Math.max(...(maxes as number[]));
+      }
+    } else if (f.subscriberRange) {
       const range = SUBSCRIBER_RANGES.find(
         (x) => x.value === f.subscriberRange,
       );
@@ -2405,7 +2442,16 @@ export default function YoutubePage() {
       params.set("strictCountry", "true");
     }
 
-    if (active.subscriberRanges?.length) {
+    const customMin = Number(active.customMinSubscribers);
+    const customMax = Number(active.customMaxSubscribers);
+    const hasCustomMin = active.customMinSubscribers !== "" && Number.isFinite(customMin);
+    const hasCustomMax = active.customMaxSubscribers !== "" && Number.isFinite(customMax);
+
+    if (hasCustomMin || hasCustomMax) {
+      // A freeform custom range takes priority over any preset tier selection.
+      if (hasCustomMin) params.set("minSubscribers", String(Math.max(0, Math.floor(customMin))));
+      if (hasCustomMax) params.set("maxSubscribers", String(Math.max(0, Math.floor(customMax))));
+    } else if (active.subscriberRanges?.length) {
       const pairs = active.subscriberRanges
         .map((value) => SUBSCRIBER_RANGES.find((item) => item.value === value))
         .filter((range): range is SubscriberRangeOption => Boolean(range))
@@ -3052,6 +3098,8 @@ export default function YoutubePage() {
     const empty: InfluencerFilters = {
       subscriberRange: "",
       subscriberRanges: [],
+      customMinSubscribers: "",
+      customMaxSubscribers: "",
       countries: [],
       category: "",
       avgViewsMin: "",
@@ -3303,6 +3351,37 @@ export default function YoutubePage() {
                     </p>
                   </div>
                 ) : null}
+
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  {[
+                    {
+                      label: "Subscriber size",
+                      active:
+                        !!filtersActive.customMinSubscribers ||
+                        !!filtersActive.customMaxSubscribers ||
+                        !!filtersActive.subscriberRange ||
+                        !!filtersActive.subscriberRanges?.length,
+                    },
+                    { label: "Country", active: !!filtersActive.countries?.length },
+                    { label: "Category", active: !!filtersActive.category },
+                    { label: "Avg views", active: !!filtersActive.avgViewsMin },
+                    { label: "Last upload", active: !!filtersActive.lastUploadDays },
+                  ].map((chip) => (
+                    <button
+                      key={chip.label}
+                      type="button"
+                      onClick={() => setFilterModalOpen(true)}
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                        chip.active
+                          ? "border-teal-200 bg-teal-50 text-teal-700"
+                          : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                      }`}
+                    >
+                      {chip.label}
+                      <ChevronDown className="h-3 w-3" />
+                    </button>
+                  ))}
+                </div>
               </div>
             </form>
           </div>
@@ -3925,196 +4004,263 @@ export default function YoutubePage() {
                 </button>
               </div>
 
-              <div className="p-6">
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-                  <div className="rounded-xl border border-slate-200 bg-white p-3">
-                    <label className="mb-2 block text-[11px] font-semibold uppercase tracking-wide text-slate-600">
-                      Subscribers Range <span className="font-normal normal-case text-slate-400">(select multiple)</span>
-                    </label>
-                    <div className="flex flex-wrap gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setFiltersDraft((p) => ({ ...p, subscriberRange: "", subscriberRanges: [] }))
-                        }
-                        className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
-                          filtersDraft.subscriberRanges.length === 0
-                            ? "bg-black text-white"
-                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                        }`}
-                      >
-                        All
-                      </button>
-                      {SUBSCRIBER_RANGES.filter((opt) => opt.value).map((opt) => {
-                        const selected = filtersDraft.subscriberRanges.includes(opt.value);
-                        return (
-                          <button
-                            key={opt.value}
-                            type="button"
-                            aria-pressed={selected}
-                            onClick={() =>
+              <div className="max-h-[70vh] overflow-y-auto p-6">
+                <div className="grid grid-cols-1 gap-x-6 gap-y-8 md:grid-cols-3">
+                  {/* INFLUENCER */}
+                  <div className="space-y-4">
+                    <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">
+                      Influencer
+                    </p>
+
+                    <div className="rounded-xl border border-slate-200 bg-white p-3">
+                      <label className="mb-2 block text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                        Subscriber Range <span className="font-normal normal-case text-slate-400">(select multiple)</span>
+                      </label>
+                      <div className="flex flex-wrap gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setFiltersDraft((p) => ({ ...p, subscriberRange: "", subscriberRanges: [] }))
+                          }
+                          className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
+                            filtersDraft.subscriberRanges.length === 0 &&
+                            !filtersDraft.customMinSubscribers &&
+                            !filtersDraft.customMaxSubscribers
+                              ? "bg-black text-white"
+                              : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                          }`}
+                        >
+                          All
+                        </button>
+                        {SUBSCRIBER_RANGES.filter((opt) => opt.value).map((opt) => {
+                          const selected = filtersDraft.subscriberRanges.includes(opt.value);
+                          return (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              aria-pressed={selected}
+                              onClick={() =>
+                                setFiltersDraft((p) => ({
+                                  ...p,
+                                  subscriberRange: "",
+                                  customMinSubscribers: "",
+                                  customMaxSubscribers: "",
+                                  subscriberRanges: selected
+                                    ? p.subscriberRanges.filter((v) => v !== opt.value)
+                                    : [...p.subscriberRanges, opt.value],
+                                }))
+                              }
+                              className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
+                                selected
+                                  ? "bg-teal-600 text-white"
+                                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                              }`}
+                            >
+                              {selected ? <Check className="h-3 w-3" /> : null}
+                              {opt.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <div className="mt-3 border-t border-dashed border-slate-200 pt-3">
+                        <p className="mb-2 text-[11px] font-medium text-slate-500">
+                          Or set an exact custom range
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            min={0}
+                            inputMode="numeric"
+                            placeholder="Min"
+                            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-transparent focus:ring-2 focus:ring-teal-600"
+                            value={filtersDraft.customMinSubscribers}
+                            onChange={(e) =>
                               setFiltersDraft((p) => ({
                                 ...p,
+                                customMinSubscribers: e.target.value.replace(/[^0-9]/g, ""),
                                 subscriberRange: "",
-                                subscriberRanges: selected
-                                  ? p.subscriberRanges.filter((v) => v !== opt.value)
-                                  : [...p.subscriberRanges, opt.value],
+                                subscriberRanges: [],
                               }))
                             }
-                            className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
-                              selected
-                                ? "bg-teal-600 text-white"
-                                : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                            }`}
-                          >
-                            {selected ? <Check className="h-3 w-3" /> : null}
-                            {opt.label}
-                          </button>
-                        );
-                      })}
+                          />
+                          <span className="shrink-0 text-xs text-slate-400">to</span>
+                          <input
+                            type="number"
+                            min={0}
+                            inputMode="numeric"
+                            placeholder="Max"
+                            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-transparent focus:ring-2 focus:ring-teal-600"
+                            value={filtersDraft.customMaxSubscribers}
+                            onChange={(e) =>
+                              setFiltersDraft((p) => ({
+                                ...p,
+                                customMaxSubscribers: e.target.value.replace(/[^0-9]/g, ""),
+                                subscriberRange: "",
+                                subscriberRanges: [],
+                              }))
+                            }
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-200 bg-white p-3">
+                      <label className="mb-2 block text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                        Category
+                      </label>
+                      <select
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-transparent focus:ring-2 focus:ring-teal-600"
+                        value={filtersDraft.category}
+                        onChange={(e) =>
+                          setFiltersDraft((p) => ({
+                            ...p,
+                            category: e.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">All</option>
+                        {CATEGORY_OPTIONS.map((cat) => (
+                          <option key={cat} value={cat}>
+                            {cat}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-200 bg-white p-3">
+                      <label className="mb-2 block text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                        Number of Influencers
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={300}
+                        placeholder="e.g. 30 (leave blank for default)"
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-transparent focus:ring-2 focus:ring-teal-600"
+                        value={filtersDraft.numberOfInfluencers}
+                        onChange={(e) =>
+                          setFiltersDraft((p) => ({
+                            ...p,
+                            numberOfInfluencers: e.target.value,
+                          }))
+                        }
+                      />
                     </div>
                   </div>
 
-                  <div className="rounded-xl border border-slate-200 bg-white p-3">
-                    <label className="mb-2 block text-[11px] font-semibold uppercase tracking-wide text-slate-600">
-                      Number of Influencers
-                    </label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={300}
-                      placeholder="e.g. 30 (leave blank for default)"
-                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-transparent focus:ring-2 focus:ring-teal-600"
-                      value={filtersDraft.numberOfInfluencers}
-                      onChange={(e) =>
-                        setFiltersDraft((p) => ({
-                          ...p,
-                          numberOfInfluencers: e.target.value,
-                        }))
-                      }
-                    />
+                  {/* LOCATION */}
+                  <div className="space-y-4">
+                    <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">
+                      Location
+                    </p>
+
+                    <div className="rounded-xl border border-slate-200 bg-white p-3">
+                      <label className="mb-2 block text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                        Country
+                      </label>
+                      <MultiCountrySelect
+                        value={filtersDraft.countries || []}
+                        onChange={(next) =>
+                          setFiltersDraft((p) => ({ ...p, countries: next }))
+                        }
+                      />
+                    </div>
                   </div>
 
-                  <div className="rounded-xl border border-slate-200 bg-white p-3">
-                    <label className="mb-2 block text-[11px] font-semibold uppercase tracking-wide text-slate-600">
-                      Country
-                    </label>
-                    <MultiCountrySelect
-                      value={filtersDraft.countries || []}
-                      onChange={(next) =>
-                        setFiltersDraft((p) => ({ ...p, countries: next }))
-                      }
-                    />
-                  </div>
+                  {/* PERFORMANCE */}
+                  <div className="space-y-4">
+                    <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">
+                      Performance
+                    </p>
 
-                  <div className="rounded-xl border border-slate-200 bg-white p-3">
-                    <label className="mb-2 block text-[11px] font-semibold uppercase tracking-wide text-slate-600">
-                      Category
-                    </label>
-                    <select
-                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-transparent focus:ring-2 focus:ring-teal-600"
-                      value={filtersDraft.category}
-                      onChange={(e) =>
-                        setFiltersDraft((p) => ({
-                          ...p,
-                          category: e.target.value,
-                        }))
-                      }
-                    >
-                      <option value="">All</option>
-                      {CATEGORY_OPTIONS.map((cat) => (
-                        <option key={cat} value={cat}>
-                          {cat}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                    <div className="rounded-xl border border-slate-200 bg-white p-3">
+                      <label className="mb-2 block text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                        Average Views
+                      </label>
+                      <select
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-transparent focus:ring-2 focus:ring-teal-600"
+                        value={filtersDraft.avgViewsMin}
+                        onChange={(e) =>
+                          setFiltersDraft((p) => ({
+                            ...p,
+                            avgViewsMin: e.target.value,
+                          }))
+                        }
+                      >
+                        {AVG_VIEWS_OPTIONS.map((opt) => (
+                          <option key={opt.value || "all"} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
 
-                  <div className="rounded-xl border border-slate-200 bg-white p-3">
-                    <label className="mb-2 block text-[11px] font-semibold uppercase tracking-wide text-slate-600">
-                      Average Views
-                    </label>
-                    <select
-                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-transparent focus:ring-2 focus:ring-teal-600"
-                      value={filtersDraft.avgViewsMin}
-                      onChange={(e) =>
-                        setFiltersDraft((p) => ({
-                          ...p,
-                          avgViewsMin: e.target.value,
-                        }))
-                      }
-                    >
-                      {AVG_VIEWS_OPTIONS.map((opt) => (
-                        <option key={opt.value || "all"} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                    <div className="rounded-xl border border-slate-200 bg-white p-3">
+                      <label className="mb-2 block text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                        Last Upload
+                      </label>
+                      <select
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-transparent focus:ring-2 focus:ring-teal-600"
+                        value={filtersDraft.lastUploadDays}
+                        onChange={(e) =>
+                          setFiltersDraft((p) => ({
+                            ...p,
+                            lastUploadDays: e.target.value,
+                          }))
+                        }
+                      >
+                        {LAST_UPLOAD_OPTIONS.map((opt) => (
+                          <option key={opt.value || "any"} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
 
-                  <div className="rounded-xl border border-slate-200 bg-white p-3">
-                    <label className="mb-2 block text-[11px] font-semibold uppercase tracking-wide text-slate-600">
-                      Last Upload
-                    </label>
-                    <select
-                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-transparent focus:ring-2 focus:ring-teal-600"
-                      value={filtersDraft.lastUploadDays}
-                      onChange={(e) =>
-                        setFiltersDraft((p) => ({
-                          ...p,
-                          lastUploadDays: e.target.value,
-                        }))
-                      }
-                    >
-                      {LAST_UPLOAD_OPTIONS.map((opt) => (
-                        <option key={opt.value || "any"} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="rounded-xl border border-slate-200 bg-white p-3">
-                    <label className="mb-2 block text-[11px] font-semibold uppercase tracking-wide text-slate-600">
-                      Sort By
-                    </label>
-                    <select
-                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-transparent focus:ring-2 focus:ring-teal-600"
-                      value={filtersDraft.sortBy}
-                      onChange={(e) =>
-                        setFiltersDraft((p) => ({
-                          ...p,
-                          sortBy: e.target.value as SavedSortValue,
-                        }))
-                      }
-                    >
-                      {SORT_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="rounded-xl border border-slate-200 bg-white p-3">
+                      <label className="mb-2 block text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                        Sort By
+                      </label>
+                      <select
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-transparent focus:ring-2 focus:ring-teal-600"
+                        value={filtersDraft.sortBy}
+                        onChange={(e) =>
+                          setFiltersDraft((p) => ({
+                            ...p,
+                            sortBy: e.target.value as SavedSortValue,
+                          }))
+                        }
+                      >
+                        {SORT_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <div className="flex items-center justify-end gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4">
+              <div className="flex items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4">
                 <button
                   type="button"
-                  className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+                  className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-600 hover:text-slate-900"
                   onClick={clearFilters}
                   disabled={listLoading}
                 >
-                  Clear All
+                  <X className="h-3.5 w-3.5" />
+                  Clear all filters
                 </button>
 
                 <button
                   type="button"
-                  className="rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal-700"
+                  className="rounded-xl bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-teal-700"
                   onClick={applyFilters}
                   disabled={listLoading}
                 >
-                  Apply Filters
+                  Show results
                 </button>
               </div>
             </div>
